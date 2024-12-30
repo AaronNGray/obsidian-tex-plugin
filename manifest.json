@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-tetex-plugin",
+  "name": "TeTeX Plugin",
+  "version": "0.0.1",
+  "minAppVersion": "0.9.12",
+  "description": "Plugin to render TeX blocks using TeTeX server",
+  "author": "Aaron Gray",
+  "authorUrl": "https://tex.tools",
+  "isDesktopOnly": false
+}
