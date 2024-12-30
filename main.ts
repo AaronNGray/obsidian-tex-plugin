@@ -9,6 +9,8 @@ interface TexPluginSettings {
   documentFooter: string[];
   packages: string[];
   scale: string;
+  texImageDirectory: string | null;
+  markdownAttachmentSubdirectory: string;
 }
 
 interface Result {
@@ -45,24 +47,20 @@ const DEFAULT_SETTINGS: TexPluginSettings = {
     "\\usepackage{floatflt,amsmath,amssymb}",
     "\\usepackage[ligature, inference]{semantic}"
   ],
-  scale: "100%"
+  scale: "125%",
+  texImageDirectory: "vault-subdirectory",
+  markdownAttachmentSubdirectory: ".images"
 };
 
 export default class TeTeXPlugin extends Plugin {
   settings: TexPluginSettings;
 
   async onload() {
-    console.log("onload():0");
     await this.loadSettings();
-    console.log("onload():1");
-
-    console.log("this.app", this.app);
 
     this.addSettingTab(new TeTeXSettingTab(this.app, this));
-    console.log("onload():2");
 
     this.registerMarkdownCodeBlockProcessor("tetex", this.process.bind(this));
-    console.log("onload():3");
   }
 
   async loadSettings() {
@@ -74,33 +72,27 @@ export default class TeTeXPlugin extends Plugin {
   }
 
   async process(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
-    console.log("process():0");
     const texDocument = this.generateTeXDocument(source);
     const hash = generateHash(texDocument);
-    const filename = hash + ".png";
-    console.log("process():1");
-    const activeFilePath = this.app.workspace.getActiveFile()?.path;
-    console.log("process():2");
-    const path = await this.app.fileManager.getAvailablePathForAttachment(filename, activeFilePath);
-    console.log("process():3");
-    
-    console.log("path = ", path);
+    const directory =
+      this.settings.texImageDirectory == "vault-subdirectory" ?
+        this.settings.markdownAttachmentSubdirectory + "/" : "";
 
-    if (!await this.app.vault.adapter.exists(path)) {
-      console.log("process():3");
+    if (!await this.app.vault.adapter.exists(directory)) {
+      await this.app.vault.createFolder(directory);
+    }
+
+    const filename = directory + hash + ".svg";
+
+    if (!await this.app.vault.adapter.exists(filename)) {
       const result:Result|false = await this.fetchImageURL(hash, texDocument);
-      console.log("process():4");
-
-      console.log("result = ", result);
      
       if (result) {
         if (!result.error) {
           const data = await this.fetchImage(result.imageURL!);
 
           if (data) {
-            console.log("process():5");
-            await this.app.vault.createBinary(path, data);
-            console.log("process():6");
+            await this.app.vault.createBinary(filename, data);
           }
           else
             console.log("error: Unable to fetch image.");
@@ -110,9 +102,7 @@ export default class TeTeXPlugin extends Plugin {
         console.log("error: Unable to connect to server or server error."); // TODO: fetch() errors
     }
 
-    console.log("process():7");
-    this.renderImage(el, this.app.vault.adapter.getResourcePath(path));
-    console.log("process():8");
+    this.renderImage(el, this.app.vault.adapter.getResourcePath(filename));
   }
 
   generateTeXDocument(fragment: string):string {
@@ -120,7 +110,7 @@ export default class TeTeXPlugin extends Plugin {
       ...this.settings.header,
       ...this.settings.packages,
       ...this.settings.documentHeader,
-      fragment,
+      fragment.trim(),
       ...this.settings.documentFooter
     ].join('\n').trim();
   }
@@ -134,7 +124,7 @@ export default class TeTeXPlugin extends Plugin {
         "hash": hash,
         "latexInput": texDocument,
         "outputScale": this.settings.scale,
-        "outputFormat": "PNG"
+        "outputFormat": "SVG"
       })
     });
 
@@ -295,5 +285,35 @@ class TeTeXSettingTab extends PluginSettingTab {
           this.plugin.settings.scale = value;
           await this.plugin.saveSettings();
         }));
+    const texImageDirectorySetting = new Setting(containerEl)
+      .setName('TeX Image Directory')
+      .setDesc('Where to save rendered TeX images')
+      .addDropdown(dropdown => dropdown
+        .addOption('vault', 'Vault Root')
+        .addOption('vault-subdirectory', 'Vault Sub directory')
+        .addOption('obsidian', 'Obsidian Directory')
+        .addOption('current', 'Current Markdown directory')
+        .addOption('subdirectory', 'Markdown Sub directory')
+        .setValue(this.plugin.settings.texImageDirectory || 'vault')
+        .onChange(async (value) => {
+          this.plugin.settings.texImageDirectory = value;
+          await this.plugin.saveSettings();
+          (<HTMLElement>subdirectorySetting.controlEl.parentNode).setAttribute("style", value == 'subdirectory' || value == 'vault-subdirectory' ? "" : "display: none;");
+          //subdirectorySetting.setDisabled(this.plugin.settings.texImageDirectory == 'vault' || this.plugin.settings.texImageDirectory == 'obsidian')
+        }));
+
+    const subdirectorySetting = new Setting(containerEl)
+      .setName('Subdirectory')
+      .setDesc('Subdirectory relative to the Markdown file for storing images')
+      .addText(text => text
+        .setPlaceholder('Enter subdirectory name')
+        .setValue(this.plugin.settings.markdownAttachmentSubdirectory)
+        //.setDisabled(this.plugin.settings.texImageDirectory == 'vault' || this.plugin.settings.texImageDirectory == 'obsidian')
+        .setDisabled(true)
+        .onChange(async (value) => {
+          this.plugin.settings.markdownAttachmentSubdirectory = value;
+          await this.plugin.saveSettings();
+        }));
+    
   }
 }
